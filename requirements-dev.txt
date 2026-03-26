@@ -1,0 +1,28 @@
+# ============================================================
+# requirements-dev.txt
+# Dépendances DÉVELOPPEMENT — installer sur Codespaces
+# pip install -r requirements-dev.txt
+# ============================================================
+
+# Même librairies que production SAUF RPi.GPIO et picamera2
+# (ces deux librairies ne fonctionnent que sur Raspberry Pi)
+
+# Traitement image
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
+# Envoi HTTP vers le serveur Django
+requests>=2.31.0
+
+# Calcul distance pour liveness (EAR)
+scipy>=1.11.0
+
+# Variables d'environnement
+python-dotenv>=1.0.0
+
+# Tests
+pytest>=7.4.0
+pytest-mock>=3.11.0
+
+# Mock pour simuler RPi.GPIO sans Raspberry Pi
+mock>=5.1.0

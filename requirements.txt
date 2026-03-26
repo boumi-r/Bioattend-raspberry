@@ -1,0 +1,24 @@
+# ============================================================
+# requirements.txt
+# Dépendances PRODUCTION — installer sur le Raspberry Pi
+# pip install -r requirements.txt
+# ============================================================
+
+# Caméra Raspberry Pi
+picamera2>=0.3.12
+
+# Traitement image
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# GPIO (capteur PIR, LED, Buzzer)
+RPi.GPIO>=0.7.1
+
+# Envoi HTTP vers le serveur Django
+requests>=2.31.0
+
+# Calcul distance pour liveness (EAR)
+scipy>=1.11.0
+
+# Variables d'environnement
+python-dotenv>=1.0.0

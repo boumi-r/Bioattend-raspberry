@@ -1,71 +1,189 @@
-import cv2
+# ============================================================
+# src/main.py
+# Rôle : script principal du système BioAttend Pi
+#
+# Flux complet :
+#   1. PIR détecte présence
+#   2. Caméra capture image
+#   3. Liveness detection (clignement yeux)
+#   4. Envoi image au serveur Django
+#   5. Décision accès + LED + Buzzer
+#   6. Journalisation
+#
+# Lancer avec : python src/main.py
+# ============================================================
+import sys
+import os
+import time
 import logging
-import gpio_feedback
-from security_manager import SecurityManager
-import requests # Pour l'API Django/Supabase
-import config
 
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
+# Ajouter src au path
+sys.path.insert(0, os.path.dirname(__file__))
+
+import config
+import pir
+import camera
+import liveness
+import api_client
+import gpio_feedback
+
+# ── Configuration du logging ─────────────────────────────────
+logging.basicConfig(
+    level   = logging.DEBUG if config.DEBUG else logging.INFO,
+    format  = "%(asctime)s [%(levelname)s] %(name)s : %(message)s",
+    handlers=[
+        logging.StreamHandler(),                    # terminal
+        logging.FileHandler("bioattend.log"),       # fichier log
+    ]
+)
 logger = logging.getLogger(__name__)
 
-def main():
-    # 1. Initialisation des composants matériels
-    gpio_feedback.setup() [cite: 308]
-    security = SecurityManager()
-    camera = cv2.VideoCapture(0) # Utilisation d'OpenCV [cite: 138, 155]
-    
-    logger.info("Système BioAttend prêt et en attente de mouvement...")
-    gpio_feedback.signal_ready()
 
+def main():
+    """
+    Boucle principale du système BioAttend.
+    Tourne indéfiniment jusqu'à Ctrl+C.
+    """
+    logger.info("=" * 55)
+    logger.info("BIOATTEND — Démarrage du système")
+    logger.info("=" * 55)
+
+    # ── 1. Validation configuration ──────────────────────────
+    try:
+        config.validate_config()
+    except ValueError as e:
+        logger.error(f"Configuration invalide : {e}")
+        sys.exit(1)
+
+    # ── 2. Initialisation GPIO ───────────────────────────────
+    gpio_feedback.setup()
+    pir.setup()
+
+    # ── 3. Initialisation caméra ─────────────────────────────
+    cam = camera.CameraManager()
+    try:
+        cam.open()
+    except Exception as e:
+        logger.error(f"Impossible d'ouvrir la caméra : {e}")
+        gpio_feedback.signal_error()
+        sys.exit(1)
+
+    # ── 4. Vérification serveur Django ───────────────────────
+    logger.info("Vérification connexion serveur Django...")
+    if not api_client.check_server():
+        logger.error("Serveur Django inaccessible — vérifier le réseau")
+        gpio_feedback.signal_error()
+        # On continue quand même — le serveur peut redémarrer
+    else:
+        logger.info("Serveur Django accessible")
+
+    # ── 5. Signal prêt ───────────────────────────────────────
+    gpio_feedback.signal_ready()
+    logger.info("Système prêt — en attente de présence...")
+    logger.info("-" * 55)
+
+    # ── 6. Boucle principale ─────────────────────────────────
     try:
         while True:
-            # simuler l'attente du capteur PIR [cite: 64, 65]
-            # if pir_detected(): 
-            
-            logger.info("Mouvement détecté ! Activation de la phase de sécurité.")
-            
-            # 2. Phase de Sécurité : Liveness Detection (Clignotement)
-            # On vérifie si c'est un humain avant tout calcul lourd [cite: 20, 158]
-            if security.verify_identity_safety(camera):
-                
-                # 3. Capture et Envoi au Backend
-                gpio_feedback.signal_processing()
-                ret, frame = camera.read()
-                
-                if ret:
-                    # Préparation des données selon le RGPD (Vecteurs/Embeddings) [cite: 161, 168]
-                    processed_frame = security.prepare_biometric_data(frame)
-                    
-                    # 4. Identification via API REST (Django -> InsightFace -> Supabase)
-                    # On envoie l'image au serveur distant pour le matchmaking [cite: 200, 204]
-                    try:
-                        response = requests.post(config.API_URL, files={'image': processed_frame})
-                        result = response.json() [cite: 207]
-                        
-                        if result.get("authenticated"):
-                            # 5. Succès : Pointage enregistré [cite: 22, 165]
-                            logger.info(f"Bienvenue {result['user_name']}")
-                            gpio_feedback.signal_access_granted()
-                        else:
-                            # Échec : Utilisateur inconnu dans la DB [cite: 428]
-                            logger.warning("Utilisateur non reconnu.")
-                            gpio_feedback.signal_access_denied()
-                            
-                    except Exception as e:
-                        logger.error(f"Erreur de connexion au serveur : {e}")
-                        gpio_feedback.signal_error()
-            else:
-                # Fraude détectée (Photo/Vidéo)
-                logger.warning("Accès bloqué : Tentative de spoofing suspectée.")
-                # Le signal d'alerte est déjà géré dans SecurityManager
+            _process_one_detection(cam)
+            # Délai anti-rebond — évite double détection
+            time.sleep(config.DEBOUNCE_DELAY)
 
     except KeyboardInterrupt:
-        logger.info("Arrêt du système par l'utilisateur.")
-    finally:
-        # Nettoyage pour éviter les surchauffes ou courts-circuits [cite: 114]
-        camera.release()
-        gpio_feedback.cleanup()
+        logger.info("Arrêt demandé par l'utilisateur (Ctrl+C)")
 
+    finally:
+        # Nettoyage propre à la sortie
+        cam.close()
+        gpio_feedback.cleanup()
+        logger.info("Système arrêté proprement")
+
+
+def _process_one_detection(cam: camera.CameraManager):
+    """
+    Traite une détection complète :
+    PIR → Caméra → Liveness → API → Décision
+
+    Paramètre :
+        cam : instance CameraManager initialisée
+    """
+
+    # ── ÉTAPE 1 : Attendre détection PIR ────────────────────
+    logger.info("En attente de présence (PIR)...")
+    detected = pir.wait_for_motion()
+
+    if not detected:
+        return
+
+    logger.info("Présence détectée !")
+    gpio_feedback.signal_processing()
+
+    # ── ÉTAPE 2 : Liveness Detection ────────────────────────
+    logger.info("Liveness detection en cours...")
+
+    video_stream = cam.get_video_stream()
+
+    if video_stream is not None:
+        # Flux vidéo disponible → liveness temps réel (clignement)
+        liveness_result = liveness.check_liveness_realtime(video_stream)
+    else:
+        # Pas de flux vidéo → capture image + analyse statique
+        logger.warning("Pas de flux vidéo — analyse image statique")
+        image_bytes     = cam.capture_image()
+        liveness_result = liveness.check_liveness_opencv(image_bytes)
+
+    logger.info(f"Liveness résultat : {liveness_result}")
+
+    # Visage non vivant → spoof détecté
+    if not liveness_result["is_live"]:
+        logger.warning(f"SPOOF détecté : {liveness_result['reason']}")
+        gpio_feedback.signal_spoof_detected()
+        return
+
+    logger.info("Liveness validée — personne vivante confirmée")
+
+    # ── ÉTAPE 3 : Capture image finale ──────────────────────
+    logger.info("Capture image pour reconnaissance...")
+    try:
+        image_bytes = cam.capture_image()
+    except Exception as e:
+        logger.error(f"Erreur capture : {e}")
+        gpio_feedback.signal_error()
+        return
+
+    # ── ÉTAPE 4 : Envoi à l'API Django ──────────────────────
+    logger.info("Envoi image au serveur Django...")
+    result = api_client.send_image(image_bytes)
+
+    # ── ÉTAPE 5 : Traitement réponse ────────────────────────
+    if not result.get("success"):
+        error = result.get("error", "Erreur inconnue")
+        logger.warning(f"API erreur : {error}")
+
+        if "inaccessible" in error or "Timeout" in error:
+            gpio_feedback.signal_error()
+        else:
+            # Aucun visage détecté par InsightFace
+            gpio_feedback.signal_access_denied()
+        return
+
+    # ── ÉTAPE 6 : Décision accès ─────────────────────────────
+    embedding = result.get("embedding", [])
+    bbox      = result.get("bbox", [])
+
+    logger.info(f"Embedding reçu : {len(embedding)} valeurs")
+    logger.info(f"Bbox visage    : {bbox}")
+
+    # Pour l'instant on log l'embedding et on autorise
+    # La comparaison avec la BDD sera ajoutée en Phase 3
+    logger.info("Embedding extrait avec succès")
+    logger.info("Phase 3 : comparaison BDD à implémenter")
+
+    # Signal accès autorisé (temporaire — sans comparaison BDD)
+    gpio_feedback.signal_access_granted()
+    logger.info("-" * 55)
+
+
+# ── Point d'entrée ───────────────────────────────────────────
 if __name__ == "__main__":
     main()

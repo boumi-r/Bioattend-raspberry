@@ -21,47 +21,50 @@ logger = logging.getLogger(__name__)
 
 # ── Chargement de GPIO (réel ou simulé) ─────────────────────
 # On essaie d'importer RPi.GPIO
-# Si on n'est pas sur un Pi → on charge le mock à la place
+# Si on n'est pas sur un Pi ou erreur d'accès → on charge le mock à la place
+
+class MockGPIO:
+    """
+    Mock de RPi.GPIO pour développement sur PC/Codespaces ou erreur sur Pi.
+    Simule toutes les fonctions sans matériel réel.
+    """
+    BCM  = "BCM"
+    OUT  = "OUT"
+    HIGH = True
+    LOW  = False
+
+    @staticmethod
+    def setmode(mode):
+        logger.debug(f"[MOCK GPIO] setmode({mode})")
+
+    @staticmethod
+    def setwarnings(flag):
+        logger.debug(f"[MOCK GPIO] setwarnings({flag})")
+
+    @staticmethod
+    def setup(pin, mode):
+        logger.debug(f"[MOCK GPIO] setup(pin={pin}, mode={mode})")
+
+    @staticmethod
+    def output(pin, state):
+        state_str = "HIGH" if state else "LOW"
+        logger.debug(f"[MOCK GPIO] output(pin={pin}, state={state_str})")
+
+    @staticmethod
+    def cleanup():
+        logger.debug("[MOCK GPIO] cleanup()")
+
+GPIO = MockGPIO
+IS_RASPBERRY = False
+
 try:
-    import RPi.GPIO as GPIO
+    import RPi.GPIO as RealGPIO
+    GPIO = RealGPIO
     IS_RASPBERRY = True
     logger.info("RPi.GPIO chargé — mode Raspberry Pi réel")
 
-except (ImportError, RuntimeError):
-    # On n'est pas sur un Pi — on crée un mock simple
-    IS_RASPBERRY = False
-    logger.warning("RPi.GPIO non disponible — mode simulation activé")
-
-    class GPIO:
-        """
-        Mock de RPi.GPIO pour développement sur PC/Codespaces.
-        Simule toutes les fonctions sans matériel réel.
-        """
-        BCM  = "BCM"
-        OUT  = "OUT"
-        HIGH = True
-        LOW  = False
-
-        @staticmethod
-        def setmode(mode):
-            logger.debug(f"[MOCK GPIO] setmode({mode})")
-
-        @staticmethod
-        def setwarnings(flag):
-            logger.debug(f"[MOCK GPIO] setwarnings({flag})")
-
-        @staticmethod
-        def setup(pin, mode):
-            logger.debug(f"[MOCK GPIO] setup(pin={pin}, mode={mode})")
-
-        @staticmethod
-        def output(pin, state):
-            state_str = "HIGH" if state else "LOW"
-            logger.debug(f"[MOCK GPIO] output(pin={pin}, state={state_str})")
-
-        @staticmethod
-        def cleanup():
-            logger.debug("[MOCK GPIO] cleanup()")
+except (ImportError, RuntimeError) as e:
+    logger.warning(f"RPi.GPIO non disponible — mode simulation activé : {e}")
 
 
 # ── Initialisation GPIO ──────────────────────────────────────
@@ -75,19 +78,40 @@ def setup():
         GPIO_LED_RED   → sortie (LED rouge)
         GPIO_BUZZER    → sortie (Buzzer)
     """
-    GPIO.setmode(GPIO.BCM)       # numérotation BCM (pas BOARD)
-    GPIO.setwarnings(False)      # désactiver les warnings GPIO
+    global GPIO, IS_RASPBERRY
 
+    if IS_RASPBERRY:
+        try:
+            GPIO.setmode(GPIO.BCM)       # numérotation BCM (pas BOARD)
+            GPIO.setwarnings(False)      # désactiver les warnings GPIO
+
+            GPIO.setup(config.GPIO_LED_GREEN, GPIO.OUT)
+            GPIO.setup(config.GPIO_LED_RED,   GPIO.OUT)
+            GPIO.setup(config.GPIO_BUZZER,    GPIO.OUT)
+
+            # S'assurer que tout est éteint au démarrage
+            GPIO.output(config.GPIO_LED_GREEN, GPIO.LOW)
+            GPIO.output(config.GPIO_LED_RED,   GPIO.LOW)
+            GPIO.output(config.GPIO_BUZZER,    GPIO.LOW)
+
+            logger.info("GPIO initialisé — LEDs et Buzzer prêts")
+            return
+
+        except RuntimeError as e:
+            logger.warning(f"Erreur d'accès GPIO sur Raspberry Pi : {e} — basculement en mode simulation")
+            GPIO = MockGPIO
+            IS_RASPBERRY = False
+
+    # Mode simulation ou fallback
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
     GPIO.setup(config.GPIO_LED_GREEN, GPIO.OUT)
     GPIO.setup(config.GPIO_LED_RED,   GPIO.OUT)
     GPIO.setup(config.GPIO_BUZZER,    GPIO.OUT)
-
-    # S'assurer que tout est éteint au démarrage
     GPIO.output(config.GPIO_LED_GREEN, GPIO.LOW)
     GPIO.output(config.GPIO_LED_RED,   GPIO.LOW)
     GPIO.output(config.GPIO_BUZZER,    GPIO.LOW)
-
-    logger.info("GPIO initialisé — LEDs et Buzzer prêts")
+    logger.info("GPIO simulé initialisé — LEDs et Buzzer en mode simulation")
 
 
 # ── Nettoyage GPIO ───────────────────────────────────────────

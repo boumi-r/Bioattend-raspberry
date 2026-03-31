@@ -4,7 +4,7 @@
 #
 # Logique : 
 #   1. Valider le caractère vivant (Liveness)
-#   2. Déclencher les alertes GPIO en cas de fraude
+#   2. Déclencher les alertes affichées à l'écran en cas de fraude
 #   3. Gérer l'anonymisation des données (Embeddings vs Images)
 #
 # Utilisé par : main.py
@@ -50,10 +50,10 @@ class SecurityManager:
 
     def _handle_fraud_attempt(self):
         """
-        Déclenche les signaux d'alerte sur la borne physique[cite: 23, 34].
+        Déclenche les messages d'alerte sur l'ecran de la borne[cite: 23, 34].
         """
         self.failed_attempts += 1
-        # Signal visuel rapide (LED rouge) et sonore (Buzzer) [cite: 501]
+        # Message d'alerte de fraude visible a l'ecran [cite: 501]
         gpio_feedback.signal_spoof_detected()
         logger.error(f"Tentative de fraude bloquée. Total échecs : {self.failed_attempts}")
 

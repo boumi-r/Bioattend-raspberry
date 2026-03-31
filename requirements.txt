@@ -1,24 +1,32 @@
 # ============================================================
 # requirements.txt
-# Dépendances PRODUCTION — installer sur le Raspberry Pi
-# pip install -r requirements.txt
+# Dépendances PRODUCTION — Raspberry Pi
+#
+# Installation recommandée:
+# pip install --upgrade pip setuptools wheel
+# pip install --no-cache-dir -r requirements.txt
+#
+# Important GPIO:
+# - rpi-lgpio fournit le module RPi.GPIO (shim de compatibilité)
+# - ne pas installer RPi.GPIO en même temps
 # ============================================================
 
 # Caméra Raspberry Pi
-picamera2>=0.3.12
+picamera2==0.3.31
 
 # Traitement image
-opencv-python>=4.8.0
-numpy>=1.24.0
+opencv-python==4.10.0.84
+numpy==1.26.4
 
-# GPIO (capteur PIR, LED, Buzzer)
-RPi.GPIO>=0.7.1
+# GPIO (capteur PIR, LED, buzzer)
+rpi-lgpio==0.6
+lgpio==0.2.2.0
 
 # Envoi HTTP vers le serveur Django
-requests>=2.31.0
+requests==2.32.3
 
 # Calcul distance pour liveness (EAR)
-scipy>=1.11.0
+scipy==1.11.4
 
 # Variables d'environnement
-python-dotenv>=1.0.0
+python-dotenv==1.0.1

@@ -7,7 +7,7 @@
 #   2. Caméra capture image
 #   3. Liveness detection (clignement yeux)
 #   4. Envoi image au serveur Django
-#   5. Décision accès + LED + Buzzer
+#   5. Décision accès + message écran
 #   6. Journalisation
 #
 # Lancer avec : python src/main.py
@@ -55,7 +55,7 @@ def main():
         logger.error(f"Configuration invalide : {e}")
         sys.exit(1)
 
-    # ── 2. Initialisation GPIO ───────────────────────────────
+    # ── 2. Initialisation feedback écran ─────────────────────
     gpio_feedback.setup()
     pir.setup()
 
@@ -179,7 +179,7 @@ def _process_one_detection(cam: camera.CameraManager):
     logger.info("Embedding extrait avec succès")
     logger.info("Phase 3 : comparaison BDD à implémenter")
 
-    # Signal accès autorisé (temporaire — sans comparaison BDD)
+    # Message accès autorisé (temporaire — sans comparaison BDD)
     gpio_feedback.signal_access_granted()
     logger.info("-" * 55)
 

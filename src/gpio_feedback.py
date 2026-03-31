@@ -1,17 +1,19 @@
 # ============================================================
 # src/gpio_feedback.py
-# Rôle : contrôler les LEDs et le buzzer via GPIO
+# Rôle : afficher des messages de statut sur l'ecran.
 #
-# Sur Raspberry Pi  → utilise RPi.GPIO (vrais composants)
-# Sur Codespaces    → utilise un mock (simulation dans logs)
+# Le projet utilisait initialement des LEDs et un buzzer via GPIO.
+# Sur le materiel actuellement deploye, ces composants ne sont pas
+# presents : on conserve donc la meme API publique mais on remplace
+# les signaux physiques par des messages descriptifs visibles a l'ecran.
 #
-# Utilisé par : main.py, pir.py, liveness.py
-# Dépend de   : config.py
+# Utilise par : main.py, pir.py, liveness.py
+# Depent de   : config.py
 # ============================================================
-import time
 import logging
-import sys
 import os
+import sys
+import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 import config
@@ -19,216 +21,106 @@ import config
 logger = logging.getLogger(__name__)
 
 
-# ── Chargement de GPIO (réel ou simulé) ─────────────────────
-# On essaie d'importer RPi.GPIO
-# Si on n'est pas sur un Pi ou erreur d'accès → on charge le mock à la place
-
-class MockGPIO:
+def _display_status(title: str, message: str, *, level: str = "info", hold_seconds: float = 0.0):
     """
-    Mock de RPi.GPIO pour développement sur PC/Codespaces ou erreur sur Pi.
-    Simule toutes les fonctions sans matériel réel.
+    Affiche un etat lisible sur l'ecran et dans les logs.
+
+    Le rendu passe par stdout afin d'etre visible sur l'ecran branche
+    au Raspberry, tout en restant exploitable dans les journaux.
     """
-    BCM  = "BCM"
-    OUT  = "OUT"
-    HIGH = True
-    LOW  = False
+    border = "=" * 55
+    screen_message = f"\n{border}\n[{title}]\n{message}\n{border}"
 
-    @staticmethod
-    def setmode(mode):
-        logger.debug(f"[MOCK GPIO] setmode({mode})")
+    print(screen_message, flush=True)
 
-    @staticmethod
-    def setwarnings(flag):
-        logger.debug(f"[MOCK GPIO] setwarnings({flag})")
+    log_method = getattr(logger, level, logger.info)
+    log_method(f"{title} - {message}")
 
-    @staticmethod
-    def setup(pin, mode):
-        logger.debug(f"[MOCK GPIO] setup(pin={pin}, mode={mode})")
-
-    @staticmethod
-    def output(pin, state):
-        state_str = "HIGH" if state else "LOW"
-        logger.debug(f"[MOCK GPIO] output(pin={pin}, state={state_str})")
-
-    @staticmethod
-    def cleanup():
-        logger.debug("[MOCK GPIO] cleanup()")
-
-GPIO = MockGPIO
-IS_RASPBERRY = False
-
-try:
-    import RPi.GPIO as RealGPIO
-    GPIO = RealGPIO
-    IS_RASPBERRY = True
-    logger.info("RPi.GPIO chargé — mode Raspberry Pi réel")
-
-except (ImportError, RuntimeError) as e:
-    logger.warning(f"RPi.GPIO non disponible — mode simulation activé : {e}")
+    if hold_seconds > 0:
+        time.sleep(hold_seconds)
 
 
-# ── Initialisation GPIO ──────────────────────────────────────
 def setup():
     """
-    Configure les pins GPIO en mode sortie.
-    Doit être appelée UNE SEULE FOIS au démarrage du script.
-
-    Pins configurés :
-        GPIO_LED_GREEN → sortie (LED verte)
-        GPIO_LED_RED   → sortie (LED rouge)
-        GPIO_BUZZER    → sortie (Buzzer)
+    Initialise le mode d'affichage des statuts a l'ecran.
     """
-    global GPIO, IS_RASPBERRY
-
-    if IS_RASPBERRY:
-        try:
-            GPIO.setmode(GPIO.BCM)       # numérotation BCM (pas BOARD)
-            GPIO.setwarnings(False)      # désactiver les warnings GPIO
-
-            GPIO.setup(config.GPIO_LED_GREEN, GPIO.OUT)
-            GPIO.setup(config.GPIO_LED_RED,   GPIO.OUT)
-            GPIO.setup(config.GPIO_BUZZER,    GPIO.OUT)
-
-            # S'assurer que tout est éteint au démarrage
-            GPIO.output(config.GPIO_LED_GREEN, GPIO.LOW)
-            GPIO.output(config.GPIO_LED_RED,   GPIO.LOW)
-            GPIO.output(config.GPIO_BUZZER,    GPIO.LOW)
-
-            logger.info("GPIO initialisé — LEDs et Buzzer prêts")
-            return
-
-        except RuntimeError as e:
-            logger.warning(f"Erreur d'accès GPIO sur Raspberry Pi : {e} — basculement en mode simulation")
-            GPIO = MockGPIO
-            IS_RASPBERRY = False
-
-    # Mode simulation ou fallback
-    GPIO.setmode(GPIO.BCM)
-    GPIO.setwarnings(False)
-    GPIO.setup(config.GPIO_LED_GREEN, GPIO.OUT)
-    GPIO.setup(config.GPIO_LED_RED,   GPIO.OUT)
-    GPIO.setup(config.GPIO_BUZZER,    GPIO.OUT)
-    GPIO.output(config.GPIO_LED_GREEN, GPIO.LOW)
-    GPIO.output(config.GPIO_LED_RED,   GPIO.LOW)
-    GPIO.output(config.GPIO_BUZZER,    GPIO.LOW)
-    logger.info("GPIO simulé initialisé — LEDs et Buzzer en mode simulation")
+    _display_status(
+        "INITIALISATION",
+        "Mode ecran actif : les retours LED et buzzer sont remplaces par des messages descriptifs.",
+    )
 
 
-# ── Nettoyage GPIO ───────────────────────────────────────────
 def cleanup():
     """
-    Remet tous les pins à LOW et libère le GPIO.
-    Doit être appelée à la fin du script (dans finally).
+    Termine proprement l'affichage des statuts.
     """
-    GPIO.output(config.GPIO_LED_GREEN, GPIO.LOW)
-    GPIO.output(config.GPIO_LED_RED,   GPIO.LOW)
-    GPIO.output(config.GPIO_BUZZER,    GPIO.LOW)
-    GPIO.cleanup()
-    logger.info("GPIO nettoyé")
+    _display_status("ARRET", "Arret du systeme BioAttend.")
 
 
-# ── Signaux visuels et sonores ───────────────────────────────
 def signal_access_granted():
     """
-    Accès autorisé :
-    - LED verte allumée pendant LED_DURATION secondes
-    - Buzzer long (1 bip long)
+    Affiche un message de succes apres validation de l'acces.
     """
-    logger.info("ACCÈS AUTORISÉ → LED verte + buzzer long")
-
-    # Allumer LED verte + buzzer
-    GPIO.output(config.GPIO_LED_GREEN, GPIO.HIGH)
-    GPIO.output(config.GPIO_BUZZER,    GPIO.HIGH)
-    time.sleep(config.BUZZER_LONG)
-
-    # Éteindre buzzer mais garder LED verte
-    GPIO.output(config.GPIO_BUZZER, GPIO.LOW)
-    time.sleep(config.LED_DURATION - config.BUZZER_LONG)
-
-    # Éteindre LED verte
-    GPIO.output(config.GPIO_LED_GREEN, GPIO.LOW)
+    _display_status(
+        "ACCES AUTORISE",
+        "Identite validee. La personne est reconnue et l'acces est autorise.",
+        hold_seconds=max(config.LED_DURATION, 0),
+    )
 
 
 def signal_access_denied():
     """
-    Accès refusé :
-    - LED rouge allumée pendant LED_DURATION secondes
-    - Buzzer court (2 bips courts)
+    Affiche un message de refus d'acces.
     """
-    logger.info("ACCÈS REFUSÉ → LED rouge + 2 bips courts")
-
-    GPIO.output(config.GPIO_LED_RED, GPIO.HIGH)
-
-    # 2 bips courts
-    for _ in range(2):
-        GPIO.output(config.GPIO_BUZZER, GPIO.HIGH)
-        time.sleep(config.BUZZER_SHORT)
-        GPIO.output(config.GPIO_BUZZER, GPIO.LOW)
-        time.sleep(config.BUZZER_SHORT)
-
-    # Garder LED rouge le reste du temps
-    time.sleep(config.LED_DURATION - (4 * config.BUZZER_SHORT))
-    GPIO.output(config.GPIO_LED_RED, GPIO.LOW)
+    _display_status(
+        "ACCES REFUSE",
+        "Authentification impossible ou visage non reconnu. Acces refuse.",
+        level="warning",
+        hold_seconds=max(config.LED_DURATION, 0),
+    )
 
 
 def signal_processing():
     """
-    Traitement en cours :
-    - LED rouge clignotante lente (3 fois)
-    - Indique que le Pi travaille
+    Affiche que le systeme analyse la presence detectee.
     """
-    logger.info("Traitement en cours → LED rouge clignotante")
-
-    for _ in range(3):
-        GPIO.output(config.GPIO_LED_RED, GPIO.HIGH)
-        time.sleep(0.3)
-        GPIO.output(config.GPIO_LED_RED, GPIO.LOW)
-        time.sleep(0.3)
+    _display_status(
+        "TRAITEMENT EN COURS",
+        "Presence detectee. Analyse du visage et verification de vivacite en cours...",
+        hold_seconds=0.6,
+    )
 
 
 def signal_spoof_detected():
     """
-    Attaque spoof détectée (photo ou vidéo présentée) :
-    - LED rouge clignotante rapide (5 fois)
-    - 3 bips courts rapides
+    Affiche une alerte claire lorsqu'une tentative de fraude est detectee.
     """
-    logger.warning("SPOOF DÉTECTÉ → LED rouge rapide + 3 bips")
-
-    for _ in range(5):
-        GPIO.output(config.GPIO_LED_RED, GPIO.HIGH)
-        GPIO.output(config.GPIO_BUZZER,  GPIO.HIGH)
-        time.sleep(0.1)
-        GPIO.output(config.GPIO_LED_RED, GPIO.LOW)
-        GPIO.output(config.GPIO_BUZZER,  GPIO.LOW)
-        time.sleep(0.1)
+    _display_status(
+        "ALERTE SECURITE",
+        "Tentative de fraude detectee : photo, video ou ecran suspect. Verification bloquee.",
+        level="warning",
+        hold_seconds=1.0,
+    )
 
 
 def signal_error():
     """
-    Erreur système (serveur inaccessible, etc.) :
-    - LED rouge allumée fixe 2 secondes
-    - 1 bip long
+    Affiche un message d'erreur systeme.
     """
-    logger.error("ERREUR SYSTÈME → LED rouge fixe")
-
-    GPIO.output(config.GPIO_LED_RED, GPIO.HIGH)
-    GPIO.output(config.GPIO_BUZZER,  GPIO.HIGH)
-    time.sleep(1.0)
-    GPIO.output(config.GPIO_BUZZER,  GPIO.LOW)
-    time.sleep(1.0)
-    GPIO.output(config.GPIO_LED_RED, GPIO.LOW)
+    _display_status(
+        "ERREUR SYSTEME",
+        "Une erreur est survenue. Verifiez la camera, le reseau ou le serveur puis reessayez.",
+        level="error",
+        hold_seconds=2.0,
+    )
 
 
 def signal_ready():
     """
-    Système prêt et en attente :
-    - LED verte clignote 2 fois rapidement
-    - Indique que le Pi est prêt à détecter
+    Affiche que le systeme est pret a recevoir un utilisateur.
     """
-    logger.info("Système prêt → LED verte 2 clignements")
-
-    for _ in range(2):
-        GPIO.output(config.GPIO_LED_GREEN, GPIO.HIGH)
-        time.sleep(0.2)
-        GPIO.output(config.GPIO_LED_GREEN, GPIO.LOW)
-        time.sleep(0.2)
+    _display_status(
+        "SYSTEME PRET",
+        "La borne est operationnelle. Placez-vous devant la camera pour demarrer la verification.",
+        hold_seconds=0.4,
+    )

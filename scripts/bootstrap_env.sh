@@ -74,11 +74,51 @@ compute_hash() {
 }
 
 create_or_reuse_venv() {
+  if [[ -d "$VENV_DIR" ]]; then
+    if is_raspberry_pi; then
+      local cfg="$VENV_DIR/pyvenv.cfg"
+      if [[ -f "$cfg" ]] && grep -q "^include-system-site-packages = false" "$cfg"; then
+        echo "[2/4] Existing venv lacks system-site-packages. Recreating for Raspberry..."
+        rm -rf "$VENV_DIR"
+      fi
+    fi
+  fi
+
   if [[ ! -d "$VENV_DIR" ]]; then
     echo "[2/4] Creating virtual environment..."
-    python3 -m venv "$VENV_DIR"
+    if is_raspberry_pi; then
+      # Ensure apt-installed modules (e.g. python3-rpi-lgpio) are visible in venv.
+      python3 -m venv --system-site-packages "$VENV_DIR"
+    else
+      python3 -m venv "$VENV_DIR"
+    fi
   else
     echo "[2/4] Reusing existing virtual environment."
+  fi
+}
+
+verify_gpio_import() {
+  if ! is_raspberry_pi; then
+    return
+  fi
+
+  # shellcheck disable=SC1091
+  source "$VENV_DIR/bin/activate"
+
+  echo "[4/4] Verifying GPIO import (RPi.GPIO)..."
+  if ! python - <<'PY'
+import importlib
+importlib.import_module("RPi.GPIO")
+print("OK: RPi.GPIO")
+PY
+  then
+    echo "[WARN] RPi.GPIO not importable in venv. Trying pip fallback..."
+    pip install --no-cache-dir rpi-lgpio lgpio
+    python - <<'PY'
+import importlib
+importlib.import_module("RPi.GPIO")
+print("OK: RPi.GPIO (after pip fallback)")
+PY
   fi
 }
 
@@ -110,7 +150,7 @@ install_python_dependencies_if_needed() {
 }
 
 print_next_step() {
-  echo "[4/4] Environment ready."
+  echo "[DONE] Environment ready."
   echo "Activate and run:"
   echo "source venv/bin/activate && python3 src/main.py"
 }
@@ -125,4 +165,5 @@ echo "[INFO] Using  : $(basename "$REQ_FILE")"
 install_system_packages
 create_or_reuse_venv
 install_python_dependencies_if_needed "$REQ_FILE"
+verify_gpio_import
 print_next_step

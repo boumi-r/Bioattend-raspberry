@@ -41,7 +41,7 @@ def send_image(image_bytes: bytes) -> dict:
     # que c'est bien le Pi qui envoie la requête
     headers = {}
     if config.API_TOKEN:
-        headers["Authorization"] = f"Token {config.API_TOKEN}"
+        headers["Authorization"] = f"Bearer {config.API_TOKEN}"
 
     # ── 2. Préparer le fichier image ────────────────────────────
     # On envoie l'image comme un fichier multipart/form-data
@@ -80,7 +80,7 @@ def send_image(image_bytes: bytes) -> dict:
     # ── 5. Gestion des erreurs réseau ────────────────────────────
     except requests.exceptions.ConnectionError:
         logger.error(f"Impossible de joindre le serveur : {config.API_ENDPOINT}")
-        logger.error("Vérifie que le serveur Django est démarré et que l'IP est correcte.")
+        logger.error("Vérifie que le serveur Django est démarré et que l'URL est correcte.")
         return {
             "success": False,
             "error":   f"Serveur inaccessible : {config.API_ENDPOINT}"
@@ -108,27 +108,3 @@ def send_image(image_bytes: bytes) -> dict:
             "error":   "Réponse serveur invalide."
         }
 
-
-def check_server() -> bool:
-    """
-    Vérifie que le serveur Django est accessible.
-    Appelée au démarrage du script principal.
-
-    Retourne True si le serveur répond, False sinon.
-    """
-    try:
-        # On fait un GET simple sur la racine du serveur
-        response = requests.get(
-            config.SERVER_URL,
-            timeout=5
-        )
-        logger.info(f"Serveur accessible — HTTP {response.status_code}")
-        return True
-
-    except requests.exceptions.ConnectionError:
-        logger.error(f"Serveur inaccessible : {config.SERVER_URL}")
-        return False
-
-    except requests.exceptions.Timeout:
-        logger.error("Serveur trop lent à répondre.")
-        return False

@@ -1,15 +1,4 @@
-# ============================================================
-# src/camera.py
-# Rôle : capturer une image avec PiCamera2
-#
-# Sur Raspberry Pi  → utilise PiCamera2 (vraie caméra)
-# Sur Codespaces    → utilise OpenCV webcam ou image simulée
-#
-# Utilisé par : main.py
-# Dépend de   : config.py
-# ============================================================
 import cv2
-import numpy as np
 import time
 import logging
 import sys
@@ -21,33 +10,25 @@ import config
 logger = logging.getLogger(__name__)
 
 
-# ── Chargement PiCamera2 (réel ou simulé) ───────────────────
 try:
     from picamera2 import Picamera2
     IS_RASPBERRY = True
     logger.info("PiCamera2 disponible — mode Raspberry Pi réel")
 except ImportError:
     IS_RASPBERRY = False
-    logger.warning("PiCamera2 non disponible — mode simulation caméra")
+    logger.warning("PiCamera2 non disponible — mode webcam OpenCV")
 
 
-# ── Classe CameraManager ─────────────────────────────────────
+
 class CameraManager:
-    """
-    Gère la caméra selon l'environnement :
-    - Raspberry Pi → PiCamera2
-    - Codespaces   → OpenCV (webcam ou image simulée)
-    """
-
+  
     def __init__(self):
         self.camera     = None
         self.is_open    = False
+        self.camera_index = config.PICAMERA_INDEX
 
     def open(self):
-        """
-        Initialise et démarre la caméra.
-        Doit être appelée une seule fois au démarrage.
-        """
+       
         if IS_RASPBERRY:
             self._open_picamera()
         else:
@@ -56,7 +37,20 @@ class CameraManager:
     def _open_picamera(self):
         """Démarre PiCamera2 sur le vrai Raspberry Pi."""
         try:
-            self.camera = Picamera2()
+            camera_info = []
+            if hasattr(Picamera2, "global_camera_info"):
+                camera_info = Picamera2.global_camera_info() or []
+
+            if camera_info:
+                if self.camera_index >= len(camera_info):
+                    raise RuntimeError(
+                        f"PICAMERA_INDEX={self.camera_index} invalide (caméras détectées: {len(camera_info)})."
+                    )
+                logger.info(f"Caméras détectées: {len(camera_info)} — utilisation index {self.camera_index}")
+            else:
+                logger.warning("Aucune caméra listée par libcamera, tentative d'ouverture quand même...")
+
+            self.camera = Picamera2(self.camera_index)
             config_cam  = self.camera.create_still_configuration(
                 main={
                     "size":   (config.CAMERA_WIDTH, config.CAMERA_HEIGHT),
@@ -73,6 +67,11 @@ class CameraManager:
             self.is_open = True
             logger.info("PiCamera2 prête")
 
+        except IndexError:
+            raise RuntimeError(
+                "Aucune caméra accessible via PiCamera2 (IndexError). Vérifie le branchement nappe/capteur, "
+                "active la caméra (raspi-config), puis teste avec 'libcamera-hello'."
+            )
         except Exception as e:
             logger.error(f"Erreur ouverture PiCamera2 : {e}")
             raise
@@ -80,7 +79,7 @@ class CameraManager:
     def _open_opencv(self):
         """
         Démarre la caméra OpenCV sur Codespaces.
-        Essaie d'ouvrir une webcam, sinon mode simulation.
+        Nécessite une webcam accessible.
         """
         self.camera = cv2.VideoCapture(0)
 
@@ -90,10 +89,10 @@ class CameraManager:
             self.is_open = True
             logger.info("Webcam OpenCV ouverte")
         else:
-            # Pas de webcam — mode simulation pure
+            # Pas de webcam — arrêt explicite
             self.camera = None
-            self.is_open = True
-            logger.warning("Aucune webcam — mode simulation image activé")
+            self.is_open = False
+            raise RuntimeError("Aucune webcam détectée (OpenCV index 0 indisponible).")
 
     def capture_image(self) -> bytes:
         """
@@ -132,13 +131,11 @@ class CameraManager:
             raise
 
     def _capture_opencv(self) -> bytes:
-        """Capture avec OpenCV ou génère une image simulée."""
+        """Capture avec OpenCV."""
         if self.camera and self.camera.isOpened():
-            # Vraie webcam disponible
             ret, frame = self.camera.read()
             if not ret:
-                logger.error("Impossible de lire la webcam")
-                return self._generate_test_image()
+                raise RuntimeError("Impossible de lire la webcam.")
 
             success, buffer = cv2.imencode(
                 '.jpg', frame,
@@ -147,28 +144,7 @@ class CameraManager:
             logger.info(f"Image webcam capturée : {len(buffer.tobytes())} bytes")
             return buffer.tobytes()
 
-        else:
-            # Mode simulation — retourner image de test si disponible
-            return self._generate_test_image()
-
-    def _generate_test_image(self) -> bytes:
-        """
-        Génère une image de test en simulation.
-        Cherche RAOUL.jpg ou crée une image grise.
-        """
-        # Chercher une image de test
-        for name in ["RAOUL.jpg", "test_face.jpg", "face.jpg"]:
-            if os.path.exists(name):
-                with open(name, "rb") as f:
-                    logger.info(f"[SIMULATION] Image de test : {name}")
-                    return f.read()
-
-        # Sinon créer une image grise basique
-        logger.warning("[SIMULATION] Génération image grise")
-        img     = np.zeros((480, 640, 3), dtype=np.uint8)
-        img[:]  = (128, 128, 128)
-        _, buf  = cv2.imencode('.jpg', img)
-        return buf.tobytes()
+        raise RuntimeError("Flux webcam non initialisé.")
 
     def get_video_stream(self):
         """
@@ -180,12 +156,12 @@ class CameraManager:
         """
         if IS_RASPBERRY:
             # Sur Pi on utilise le flux PiCamera2 via OpenCV
-            return cv2.VideoCapture(0)
+            return cv2.VideoCapture(self.camera_index)
         else:
             if self.camera and self.camera.isOpened():
                 return self.camera
             else:
-                logger.warning("Pas de flux vidéo disponible — simulation")
+                logger.warning("Pas de flux vidéo disponible")
                 return None
 
     def close(self):

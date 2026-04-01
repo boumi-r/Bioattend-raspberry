@@ -11,7 +11,7 @@ load_dotenv()
 
 
 # ── Serveur Django ───────────────────────────────────────────
-SERVER_URL    = os.getenv("SERVER_URL", "http://192.168.1.100:8000")
+SERVER_URL    = os.getenv("SERVER_URL", "https://bioattend.138.199.195.144.sslip.io")
 API_ENDPOINT  = f"{SERVER_URL.rstrip('/')}/api/face/analyze/"
 API_TOKEN     = os.getenv("API_TOKEN", "")
 
@@ -39,6 +39,7 @@ GPIO_BUZZER     = int(os.getenv("GPIO_BUZZER", "23"))
 CAMERA_WIDTH    = int(os.getenv("CAMERA_WIDTH", "1280"))
 CAMERA_HEIGHT   = int(os.getenv("CAMERA_HEIGHT", "720"))
 CAMERA_WARMUP   = 2   # secondes de chauffe caméra avant capture
+PICAMERA_INDEX  = int(os.getenv("PICAMERA_INDEX", "0"))
 
 # ── Timing ───────────────────────────────────────────────────
 DEBOUNCE_DELAY  = 3   # secondes entre deux détections PIR
@@ -67,6 +68,9 @@ def validate_config():
     if DISTANCE_THRESHOLD <= 0 or DISTANCE_THRESHOLD >= 1:
         errors.append(f"DISTANCE_THRESHOLD invalide : {DISTANCE_THRESHOLD} (doit être entre 0 et 1)")
 
+    if PICAMERA_INDEX < 0:
+        errors.append(f"PICAMERA_INDEX invalide : {PICAMERA_INDEX} (doit être >= 0)")
+
     if errors:
         for e in errors:
             print(f"[CONFIG ERREUR] {e}")
@@ -82,3 +86,4 @@ def validate_config():
         print(f"  GPIO_LED_GREEN    : {GPIO_LED_GREEN}")
         print(f"  GPIO_LED_RED      : {GPIO_LED_RED}")
         print(f"  GPIO_BUZZER       : {GPIO_BUZZER}")
+        print(f"  PICAMERA_INDEX    : {PICAMERA_INDEX}")

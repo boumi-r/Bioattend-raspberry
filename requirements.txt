@@ -18,7 +18,7 @@ picamera2==0.3.31
 opencv-python==4.10.0.84
 numpy==1.26.4
 
-# GPIO (capteur PIR, LED, buzzer)
+# GPIO (capteur PIR)
 rpi-lgpio==0.6
 lgpio==0.2.2.0
 

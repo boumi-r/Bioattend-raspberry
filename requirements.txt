@@ -25,6 +25,10 @@ lgpio==0.2.2.0
 # Envoi HTTP vers le serveur Django
 requests==2.32.3
 
+# Reconnaissance faciale — extraction embeddings
+insightface==0.7.3
+onnxruntime==1.16.3
+
 # Calcul distance pour liveness (EAR)
 scipy==1.11.4
 

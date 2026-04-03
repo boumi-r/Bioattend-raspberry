@@ -5,13 +5,12 @@ load_dotenv()
 
 
 SERVER_URL    = os.getenv("SERVER_URL", "https://bioattend.138.199.195.144.sslip.io")
-API_ENDPOINT  = f"{SERVER_URL.rstrip('/')}/api/face/analyze/"
+API_ENDPOINT  = f"{SERVER_URL.rstrip('/')}/api/face/identify/"
 API_TOKEN     = os.getenv("API_TOKEN", "")
 
-# ── Seuils de reconnaissance ─────────────────────────────────
+
 # Distance cosine InsightFace
-# < DISTANCE_THRESHOLD = même personne → accès autorisé
-# > DISTANCE_THRESHOLD = personne différente → accès refusé
+
 DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "0.60"))
 
 # ── Liveness detection ───────────────────────────────────────

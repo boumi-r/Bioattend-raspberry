@@ -10,34 +10,57 @@ import config
 
 logger = logging.getLogger(__name__)
 picamera2 = None
+_is_running = False
 
 
 def open_camera():
     
-    global picamera2
+    global picamera2, _is_running
     picamera2 = Picamera2()
     cam_config = picamera2.create_preview_configuration(
         main={"format": "RGB888", "size": (config.CAMERA_WIDTH, config.CAMERA_HEIGHT)}
     )
     picamera2.configure(cam_config)
     picamera2.start()
+    _is_running = True
     time.sleep(config.CAMERA_WARMUP)
     logger.info("Caméra démarrée (%dx%d)", config.CAMERA_WIDTH, config.CAMERA_HEIGHT)
 
 
 def close_camera():
     
-    global picamera2
+    global picamera2, _is_running
     if picamera2 is not None:
         picamera2.stop()
         picamera2 = None
+        _is_running = False
         logger.info("Caméra arrêtée.")
+
+
+def pause_camera():
+
+    global _is_running
+    if picamera2 is not None and _is_running:
+        picamera2.stop()
+        _is_running = False
+        logger.info("Aucun mouvement détecté,Caméra en pause pour économiser de l'énergie")
+
+
+def mouvement_camera():
+    global _is_running
+    if picamera2 is not None and not _is_running:
+        picamera2.start()
+        _is_running = True
+        time.sleep(config.CAMERA_WARMUP)
+        logger.info("mouvement détecté, caméra réactivée")
 
 
 def capture_image_opencv():
    
     if picamera2 is None:
         raise RuntimeError("Caméra non initialisée — appeler open_camera() d'abord")
+    if not _is_running:
+        raise RuntimeError("Caméra en pause — appeler mouvement_camera() d'abord")
 
     image_rgb = picamera2.capture_array()
     image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
@@ -51,7 +74,6 @@ def capture_image_opencv():
 
 
 def get_video_stream():
-    """Retourne l'instance Picamera2 pour le flux vidéo (liveness)."""
     return picamera2
 
 

@@ -1,11 +1,12 @@
 # ============================================================
 # src/api_client.py
-# Rôle : envoyer l'image au serveur Django et récupérer
-#        les embeddings + la décision d'accès
+# Rôle : envoyer l'embedding au serveur Django et récupérer
+#        la décision d'identification
 #
 # Utilisé par : main.py
 # Dépend de   : config.py
 # ============================================================
+import json
 import requests
 import logging
 import sys
@@ -19,75 +20,63 @@ import config
 logger = logging.getLogger(__name__)
 
 
-def send_image(image_bytes: bytes) -> dict:
+def check_server() -> bool:
+    """Vérifie que le serveur Django est accessible."""
+    try:
+        response = requests.get(config.SERVER_URL, timeout=10)
+        return response.status_code < 500
+    except requests.exceptions.RequestException:
+        return False
+
+
+def send_embedding(embedding: list, bbox: list) -> dict:
     """
-    Envoie une image au serveur Django via HTTP POST.
+    Envoie l'embedding au serveur Django via HTTP POST.
 
-    Paramètre :
-        image_bytes : les bytes de l'image capturée par la caméra
+    Paramètres :
+        embedding : liste de 512 floats (vecteur InsightFace)
+        bbox      : [x1, y1, x2, y2] du visage détecté
 
-    Retourne un dictionnaire :
-        {
-            "success"      : True / False
-            "face_detected": True / False
-            "embedding"    : liste de 512 floats (si succès)
-            "bbox"         : [x1, y1, x2, y2] (si succès)
-            "error"        : message d'erreur (si échec)
-        }
+    Retourne un dictionnaire avec la réponse du serveur.
     """
 
-    # ── 1. Préparer les headers HTTP ────────────────────────────
-    # Le token permet au serveur Django de vérifier
-    # que c'est bien le Pi qui envoie la requête
-    headers = {}
+    headers = {"Content-Type": "application/json"}
     if config.API_TOKEN:
         headers["Authorization"] = f"Bearer {config.API_TOKEN}"
 
-    # ── 2. Préparer le fichier image ────────────────────────────
-    # On envoie l'image comme un fichier multipart/form-data
-    # C'est exactement ce que Django attend dans request.FILES
-    files = {
-        "image": ("capture.jpg", image_bytes, "image/jpeg")
-        #           ↑ nom       ↑ bytes       ↑ type MIME
+    payload = {
+        "embedding": embedding,
+        "bbox": bbox,
     }
 
-    # ── 3. Envoyer la requête POST ──────────────────────────────
     try:
-        logger.info(f"Envoi image vers {config.API_ENDPOINT}...")
+        logger.info(f"Envoi embedding vers {config.API_ENDPOINT}...")
 
         response = requests.post(
             url     = config.API_ENDPOINT,
-            files   = files,
+            json    = payload,
             headers = headers,
-            timeout = 60   # secondes — évite de bloquer indéfiniment
+            timeout = 60,
         )
 
-        # ── 4. Analyser la réponse ───────────────────────────────
         logger.info(f"Réponse reçue — HTTP {response.status_code}")
 
-        # Convertir la réponse JSON en dictionnaire Python
         data = response.json()
 
         if config.DEBUG:
-            if data.get("success"):
-                logger.debug(f"Embedding reçu : {len(data.get('embedding', []))} valeurs")
-                logger.debug(f"Bbox : {data.get('bbox')}")
-            else:
-                logger.debug(f"Erreur serveur : {data.get('error')}")
+            logger.debug(f"Réponse serveur : {data}")
 
         return data
 
-    # ── 5. Gestion des erreurs réseau ────────────────────────────
     except requests.exceptions.ConnectionError:
         logger.error(f"Impossible de joindre le serveur : {config.API_ENDPOINT}")
-        logger.error("Vérifie que le serveur Django est démarré et que l'URL est correcte.")
         return {
             "success": False,
             "error":   f"Serveur inaccessible : {config.API_ENDPOINT}"
         }
 
     except requests.exceptions.Timeout:
-        logger.error("Le serveur n'a pas répondu dans les 10 secondes.")
+        logger.error("Le serveur n'a pas répondu à temps.")
         return {
             "success": False,
             "error":   "Timeout — le serveur met trop de temps à répondre."
@@ -101,7 +90,6 @@ def send_image(image_bytes: bytes) -> dict:
         }
 
     except ValueError as e:
-        # ValueError si la réponse n'est pas du JSON valide
         logger.error(f"Réponse invalide du serveur (pas du JSON) : {e}")
         return {
             "success": False,

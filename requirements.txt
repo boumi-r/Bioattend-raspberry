@@ -19,11 +19,10 @@ opencv-python==4.10.0.84
 numpy==1.26.4
 
 # Deep Learning - Anti-Spoofing (PyTorch pour Raspberry Pi)
-# Note: PyTorch 2.0.1 requires Python <3.12
-# For Python 3.12+ (Codespace) use 2.2.0+, for Raspberry Pi use 2.0.1
-# Installation pour RPi: pip install torch==2.0.1 torchvision==0.15.2 --break-system-packages
-torch==2.2.0
-torchvision==0.17.0
+# PyTorch 2.7.0 compatible avec Python 3.12+ sur Raspberry Pi
+# Installation pour RPi: pip install torch torchvision --break-system-packages
+torch==2.7.0
+torchvision==0.18.0
 
 # GPIO (capteur PIR, LED, buzzer)
 rpi-lgpio==0.6

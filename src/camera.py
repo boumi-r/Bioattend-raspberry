@@ -56,6 +56,13 @@ class CameraManager:
 
         return buffer.tobytes()
 
+    def capture_image(self):
+        """
+        Alias pour capture_jpeg() — retourne bytes JPEG
+        Compatible avec le système principal
+        """
+        return self.capture_jpeg()
+
     def close(self):
         """Ferme la caméra"""
         if self.camera:

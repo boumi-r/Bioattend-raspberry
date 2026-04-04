@@ -5,7 +5,7 @@
 # Flux complet :
 #   1. PIR détecte présence
 #   2. Caméra capture image
-#   3. Liveness detection (clignement yeux)
+#   3. Anti-spoof prediction (MiniFASNet)
 #   4. Envoi image au serveur Django
 #   5. Décision accès + message écran
 #   6. Journalisation
@@ -16,6 +16,8 @@ import sys
 import os
 import time
 import logging
+import cv2
+import numpy as np
 
 # Ajouter src au path
 sys.path.insert(0, os.path.dirname(__file__))
@@ -23,9 +25,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 import config
 import pir
 import camera
-import liveness
 import api_client
 import gpio_feedback
+from anti_spoof_predict import AntiSpoofPredict
 
 # ── Configuration du logging ─────────────────────────────────
 logging.basicConfig(
@@ -59,7 +61,16 @@ def main():
     gpio_feedback.setup()
     pir.setup()
 
-    # ── 3. Initialisation caméra ─────────────────────────────
+    # ── 3. Initialisation anti-spoof predict ─────────────────
+    try:
+        anti_spoof = AntiSpoofPredict(device_id=0)
+        logger.info("AntiSpoofPredict initialisé")
+    except Exception as e:
+        logger.error(f"Impossible d'initialiser AntiSpoofPredict : {e}")
+        gpio_feedback.signal_error()
+        sys.exit(1)
+
+    # ── 4. Initialisation caméra ─────────────────────────────
     cam = camera.CameraManager()
     try:
         cam.open()
@@ -68,7 +79,7 @@ def main():
         gpio_feedback.signal_error()
         sys.exit(1)
 
-    # ── 4. Vérification serveur Django ───────────────────────
+    # ── 5. Vérification serveur Django ───────────────────────
     logger.info("Vérification connexion serveur Django...")
     if not api_client.check_server():
         logger.error("Serveur Django inaccessible — vérifier le réseau")
@@ -77,15 +88,15 @@ def main():
     else:
         logger.info("Serveur Django accessible")
 
-    # ── 5. Signal prêt ───────────────────────────────────────
+    # ── 6. Signal prêt ───────────────────────────────────────
     gpio_feedback.signal_ready()
     logger.info("Système prêt — en attente de présence...")
     logger.info("-" * 55)
 
-    # ── 6. Boucle principale ─────────────────────────────────
+    # ── 7. Boucle principale ─────────────────────────────────
     try:
         while True:
-            _process_one_detection(cam)
+            _process_one_detection(cam, anti_spoof)
             # Délai anti-rebond — évite double détection
             time.sleep(config.DEBOUNCE_DELAY)
 
@@ -99,13 +110,14 @@ def main():
         logger.info("Système arrêté proprement")
 
 
-def _process_one_detection(cam: camera.CameraManager):
+def _process_one_detection(cam: camera.CameraManager, anti_spoof: AntiSpoofPredict):
     """
     Traite une détection complète :
-    PIR → Caméra → Liveness → API → Décision
+    PIR → Caméra → Anti-Spoof → API → Décision
 
-    Paramètre :
+    Paramètres :
         cam : instance CameraManager initialisée
+        anti_spoof : instance AntiSpoofPredict initialisée
     """
 
     # ── ÉTAPE 1 : Attendre détection PIR ────────────────────
@@ -118,38 +130,60 @@ def _process_one_detection(cam: camera.CameraManager):
     logger.info("Présence détectée !")
     gpio_feedback.signal_processing()
 
-    # ── ÉTAPE 2 : Liveness Detection ────────────────────────
-    logger.info("Liveness detection en cours...")
-
-    video_stream = cam.get_video_stream()
-
-    if video_stream is not None:
-        # Flux vidéo disponible → liveness temps réel (clignement)
-        liveness_result = liveness.check_liveness_realtime(video_stream)
-    else:
-        # Pas de flux vidéo → capture image + analyse statique
-        logger.warning("Pas de flux vidéo — analyse image statique")
-        image_bytes     = cam.capture_image()
-        liveness_result = liveness.check_liveness_opencv(image_bytes)
-
-    logger.info(f"Liveness résultat : {liveness_result}")
-
-    # Visage non vivant → spoof détecté
-    if not liveness_result["is_live"]:
-        logger.warning(f"SPOOF détecté : {liveness_result['reason']}")
-        gpio_feedback.signal_spoof_detected()
-        return
-
-    logger.info("Liveness validée — personne vivante confirmée")
-
-    # ── ÉTAPE 3 : Capture image finale ──────────────────────
-    logger.info("Capture image pour reconnaissance...")
+    # ── ÉTAPE 2 : Anti-Spoof Prediction ────────────────────────────────────────────
+    logger.info("Anti-spoof prediction en cours...")
+    
     try:
         image_bytes = cam.capture_image()
     except Exception as e:
-        logger.error(f"Erreur capture : {e}")
+        logger.error(f"Erreur capture image pour anti-spoof : {e}")
         gpio_feedback.signal_error()
         return
+    
+    # Convertir bytes en image OpenCV
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    
+    if img is None:
+        logger.error("Image invalide pour anti-spoof")
+        gpio_feedback.signal_spoof_detected()
+        return
+    
+    # Charger le meilleur modèle disponible
+    model_path = None
+    for model_file in os.listdir("./models"):
+        if model_file.endswith(".pth"):
+            model_path = os.path.join("./models", model_file)
+            logger.info(f"Utilisation du modèle : {model_file}")
+            break
+    
+    if model_path is None:
+        logger.error("Aucun modèle .pth trouvé dans ./models")
+        gpio_feedback.signal_error()
+        return
+    
+    # Prédiction anti-spoof
+    try:
+        result = anti_spoof.predict(img, model_path)
+        # result est un array softmax [fake_score, real_score]
+        fake_score = float(result[0][0])
+        real_score = float(result[0][1])
+        logger.info(f"Anti-spoof scores - Fake: {fake_score:.4f}, Real: {real_score:.4f}")
+        
+        # Seuil : si score réel > 0.5, visage vivant
+        if real_score < 0.5:
+            logger.warning(f"SPOOF détecté (score réel: {real_score:.4f})")
+            gpio_feedback.signal_spoof_detected()
+            return
+        
+        logger.info(f"Liveness validée - Visage vivant confirmé (score: {real_score:.4f})")
+    except Exception as e:
+        logger.error(f"Erreur lors de anti-spoof prediction : {e}")
+        gpio_feedback.signal_error()
+        return
+
+    # ── ÉTAPE 3 : Image déjà capturée lors de l'anti-spoof ────────────
+    logger.info("Image capturée — passage à l'envoi API")
 
     # ── ÉTAPE 4 : Envoi à l'API Django ──────────────────────
     logger.info("Envoi image au serveur Django...")

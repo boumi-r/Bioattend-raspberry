@@ -32,7 +32,7 @@ lgpio==0.2.2.0
 requests==2.32.3
 
 # Calcul distance pour liveness (EAR)
-scipy==1.11.4
+scipy>=1.14.0
 
 # Variables d'environnement
 python-dotenv==1.0.1

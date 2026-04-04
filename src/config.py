@@ -10,7 +10,7 @@ load_dotenv()
 # ── Serveur Django ───────────────────────────────────────────
 SERVER_URL         = os.getenv("SERVER_URL", "http://192.168.1.100:8000")
 API_ENDPOINT       = f"{SERVER_URL.rstrip('/')}/api/face/analyze/"
-API_TOKEN          = os.getenv("API_TOKEN", "")
+API_TOKEN          = os.getenv("API_TOKEN", "")  # Used as: Authorization: Bearer {API_TOKEN}
 
 # ── Seuils reconnaissance ────────────────────────────────────
 DISTANCE_THRESHOLD = float(os.getenv("DISTANCE_THRESHOLD", "0.60"))

@@ -37,11 +37,11 @@ def send_image(image_bytes: bytes) -> dict:
     """
 
     # ── 1. Préparer les headers HTTP ────────────────────────────
-    # Le token permet au serveur Django de vérifier
+    # Le bearer token permet au serveur Django de vérifier
     # que c'est bien le Pi qui envoie la requête
     headers = {}
     if config.API_TOKEN:
-        headers["Authorization"] = f"Token {config.API_TOKEN}"
+        headers["Authorization"] = f"Bearer {config.API_TOKEN}"
 
     # ── 2. Préparer le fichier image ────────────────────────────
     # On envoie l'image comme un fichier multipart/form-data
